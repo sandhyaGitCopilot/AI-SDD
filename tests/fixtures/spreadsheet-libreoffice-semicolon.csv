@@ -1,0 +1,20 @@
+﻿# jira-testgen draft v1
+# run_id: PROJ-123-20261006-142233
+# source_issue: PROJ-123
+# source_summary: Users can reset their password by email
+# fields_read: summary, description, Acceptance Criteria
+# generated_by: anthropic/claude-opus-5-5
+# generated_at: 2026-10-06T14:22:33+00:00
+# DO NOT EDIT the test_id column. Edit any other cell freely.
+"test_id";"approval";"kind";"summary";"preconditions";"steps";"expected_results";"traces_to";"jira_key";"notes"
+"TC-AB12-001";"approved";"positive";"Reset link is emailed to a registered address";"A registered account exists for qa@example.com";"1. Open the password reset page
+2. Enter qa@example.com
+3. Submit the form";"1. The reset page loads
+2. The field accepts the address
+3. A reset email is sent";"AC-1";"";""
+"TC-AB12-002";"approved";"negative";"Unregistered address shows a generic notice, not ""no such user""";"";"1. Open the password reset page
+2. Enter nobody@example.com
+3. Submit the form";"1. A generic notice is shown and no account existence is revealed";"AC-2";"";"Wording matters here, see the security note"
+"TC-AB12-003";"rejected";"edge";"Reset link expires after 24 hours";"A reset link was issued 25 hours ago";"1. Open the expired reset link
+2. Attempt to set a new password";"1. An expiry notice is shown
+2. The password is unchanged";"AC-3";"";""
