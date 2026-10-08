@@ -132,6 +132,60 @@ class TestGenerateJson:
             generate(tmp_path, stub_generation, no_wait=True, yes=True)
         assert exc.value.exit_code == 2
 
+    def test_already_linked_test_cases_reach_a_scripted_caller(
+        self, tmp_path: Path, jira_mock: Any, stub_generation: Any, capsys: Any
+    ) -> None:
+        """T091, FR-005: the human path prints prior test cases before generating. A
+        --json caller gets no stdout prose at all, so without this key it is the one
+        audience never told the requirement has already been worked -- and it is the
+        audience FR-028 exists to serve."""
+        import httpx
+
+        from .conftest import DEFAULT_DESCRIPTION
+
+        jira_mock.get(path__regex=r"/issue/[A-Z][A-Z0-9_]+-\d+$").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "key": "PROJ-123",
+                    "fields": {
+                        "summary": "Users can reset their password by email",
+                        "description": DEFAULT_DESCRIPTION,
+                        "project": {"key": "PROJ"},
+                        "issuelinks": [
+                            {
+                                "type": {
+                                    "name": "Relates",
+                                    "inward": "relates to",
+                                    "outward": "relates to",
+                                },
+                                "outwardIssue": {
+                                    "key": "QA-9",
+                                    "fields": {
+                                        "summary": "Existing test case",
+                                        "issuetype": {"name": "Task"},
+                                    },
+                                },
+                            }
+                        ],
+                    },
+                },
+            )
+        )
+        generate(tmp_path, stub_generation, no_wait=True)
+        payload = parse_stdout(capsys)
+
+        assert [ref["issue_key"] for ref in payload["existing_linked_tests"]] == ["QA-9"]
+        assert payload["existing_linked_tests"][0]["summary"] == "Existing test case"
+
+    def test_no_prior_links_is_an_empty_list_not_a_missing_key(
+        self, tmp_path: Path, jira_mock: Any, stub_generation: Any, capsys: Any
+    ) -> None:
+        """A script should branch on an empty list, not on a KeyError."""
+        generate(tmp_path, stub_generation, no_wait=True)
+        payload = parse_stdout(capsys)
+        assert payload["existing_linked_tests"] == []
+
 
 class TestApproveJson:
     def test_publish_result_is_one_object(
