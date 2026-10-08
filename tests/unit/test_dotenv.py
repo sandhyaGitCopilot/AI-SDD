@@ -18,6 +18,7 @@ directory, and none can pick up a real `.env` from the repository root.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -291,6 +292,70 @@ class TestPrecedence:
             monkeypatch.setenv(name, value)
         settings = load_settings(dotenv_path=None)
         assert settings.jira.email == "you@example.com"
+
+
+class TestShadowingIsAnnounced:
+    """T092 -- the spec's edge case wants the environment to win *and* the tool to say
+    the file value was not used. Winning silently makes a stale file safe but not
+    diagnosable: the user edits the file, nothing changes, and nothing points at the
+    export that is actually in charge."""
+
+    def test_a_shadowed_name_is_recorded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("JIRA_API_TOKEN", "exported-token")
+        settings = load_settings(dotenv_path=complete_env(tmp_path))
+        assert settings.shadowed_dotenv_names == ("JIRA_API_TOKEN",)
+        assert settings.jira.api_token.reveal() == "exported-token"
+
+    def test_a_shadowed_name_is_reported_to_the_user(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setenv("JIRA_API_TOKEN", "exported-token")
+        with caplog.at_level(logging.WARNING, logger="jira_testgen.config"):
+            load_settings(dotenv_path=complete_env(tmp_path))
+        message = caplog.text
+        assert "JIRA_API_TOKEN" in message
+        assert DOTENV_FILENAME in message
+        assert "precedence" in message
+
+    def test_the_report_names_the_variable_but_never_either_value(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """FR-026b and FR-027 are absolute: the value is the secret, so neither the
+        exported one nor the file one may appear in a diagnostic about them."""
+        monkeypatch.setenv("JIRA_API_TOKEN", "exported-secret-value")
+        with caplog.at_level(logging.WARNING, logger="jira_testgen.config"):
+            load_settings(dotenv_path=complete_env(tmp_path))
+        assert "exported-secret-value" not in caplog.text
+        assert "file-token" not in caplog.text
+
+    def test_every_shadowed_name_is_listed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("JIRA_EMAIL", "exported@example.com")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-exported")
+        settings = load_settings(dotenv_path=complete_env(tmp_path))
+        assert set(settings.shadowed_dotenv_names) == {"JIRA_EMAIL", "ANTHROPIC_API_KEY"}
+
+    def test_nothing_is_said_when_nothing_is_shadowed(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING, logger="jira_testgen.config"):
+            settings = load_settings(dotenv_path=complete_env(tmp_path))
+        assert settings.shadowed_dotenv_names == ()
+        assert caplog.text == ""
+
+    def test_an_exported_but_blank_value_does_not_count_as_shadowing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An exported-but-empty variable counts as unset everywhere else in this module
+        (see ``_resolve``), so reporting it as shadowing would contradict the behaviour
+        the user actually gets -- the file value is what gets used."""
+        monkeypatch.setenv("JIRA_API_TOKEN", "   ")
+        settings = load_settings(dotenv_path=complete_env(tmp_path))
+        assert settings.shadowed_dotenv_names == ()
+        assert settings.jira.api_token.reveal() == "file-token"
 
 
 class TestTheFileIsNotLeakedIntoTheProcess:

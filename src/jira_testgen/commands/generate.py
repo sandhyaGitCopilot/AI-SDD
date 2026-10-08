@@ -181,6 +181,11 @@ def run_generate(
         "draft_path": str(draft_path),
         "run_directory": str(directory),
         "target_project": resolved_target,
+        # FR-005 for scripted callers (T091). The human path prints this before generating;
+        # without it here, a --json caller is the only one never told the requirement
+        # already has test cases linked from a previous run -- which is the audience
+        # FR-028 exists for.
+        "existing_linked_tests": [ref.model_dump() for ref in source.existing_linked_tests],
         "cases": len(cases),
         "coverage": coverage_summary(source, cases, settings.generation.max_cases),
         "coverage_notes": notes,

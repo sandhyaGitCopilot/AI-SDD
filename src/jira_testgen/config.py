@@ -32,6 +32,8 @@ from typing import Any, Literal
 
 from jira_testgen.errors import InvalidArguments
 
+logger = logging.getLogger("jira_testgen.config")
+
 REDACTED = "***"
 
 #: Effort levels the Claude API accepts for output_config.
@@ -199,6 +201,10 @@ class Settings:
     site: SiteSettings
     workspace: Path = field(default=DEFAULT_WORKSPACE)
 
+    #: Names the `.env` file supplied that were not used, because the environment already
+    #: had them (T092). Names only -- never values (FR-026b, FR-027).
+    shadowed_dotenv_names: tuple[str, ...] = ()
+
     def secrets(self) -> list[Secret]:
         return [self.jira.api_token, self.generation.api_key]
 
@@ -299,6 +305,19 @@ def _unquote(value: str) -> str:
     return value
 
 
+def shadowed_dotenv_names(overrides: dict[str, str]) -> tuple[str, ...]:
+    """Names the `.env` file supplied that the environment overrode (T092).
+
+    The spec's edge case asks for two things when a name is set in both places: that the
+    environment wins, and that *the tool says the file value was not used*. The first half
+    alone makes a stale file safe but not diagnosable -- the user edits the file, sees no
+    change, and has nothing pointing at the export that is actually winning.
+
+    Returns names only. The value is the secret, so it is never part of this (FR-026b).
+    """
+    return tuple(name for name in overrides if os.environ.get(name, "").strip())
+
+
 def _resolve(name: str, overrides: dict[str, str]) -> str:
     """Look a name up: the real environment first, then the `.env` values (FR-026a).
 
@@ -361,6 +380,20 @@ def load_settings(
 
     from_file = load_dotenv_file(dotenv_path or default_dotenv_path())
 
+    # T092: say so when the file supplied a name the environment already had. Emitted at
+    # WARNING so it reaches the user through logging's handler of last resort before any
+    # run log exists, and lands in run.log once one does.
+    shadowed = shadowed_dotenv_names(from_file)
+    if shadowed:
+        logger.warning(
+            "%s in %s %s not used: the same %s set in the environment, which takes "
+            "precedence. Unset the environment variable(s) to use the file value(s).",
+            ", ".join(shadowed),
+            DOTENV_FILENAME,
+            "was" if len(shadowed) == 1 else "were",
+            "name is" if len(shadowed) == 1 else "names are",
+        )
+
     jira = JiraSettings(
         base_url=_require(
             "JIRA_BASE_URL", "your Jira site URL, e.g. https://acme.atlassian.net", from_file
@@ -394,6 +427,7 @@ def load_settings(
         generation=generation,
         site=site,
         workspace=workspace or DEFAULT_WORKSPACE,
+        shadowed_dotenv_names=shadowed,
     )
     install_redaction(list(settings.secrets()))
     return settings
